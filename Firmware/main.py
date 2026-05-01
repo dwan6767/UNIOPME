@@ -2,24 +2,17 @@ import utime
 import math
 from machine import ADC, Pin
 
-# ─── Configuration ───────────────────────────────────────────
-SAMPLES         = 500       # Number of samples per reading
-SAMPLE_DELAY_US = 200       # 200us = 5000Hz sample rate
-ADC_VREF        = 3.3
-ADC_COUNTS      = 65535
+SAMPLES = 500
+SAMPLE_DELAY_US = 200
+ADC_VREF = 3.3
+ADC_COUNTS = 65535
+ICAL = 16.667 / 3
 
-# ─── Calibration ─────────────────────────────────────────────
-VCAL = 268.97  # Voltage calibration factor
-ICAL = 16.667/3  # Current calibration factor
-
-# ─── Hardware Init ───────────────────────────────────────────
-adc_v = ADC(Pin(26))  # ZMPT101B
-adc_i = ADC(Pin(27))  # ZMCT103C
+adc_i = ADC(Pin(27))
 
 def print_header():
-   
     print(r"""
-================================================================
+===============================================================
    _____   ______          ________ _____  
   |  __ \ / __ \ \        / /  ____|  __ \ 
   | |__) | |  | \ \  /\  / /| |__  | |__) |
@@ -34,77 +27,78 @@ def print_header():
   | |  | | |____   | |  | |____| | \ \ 
   |_|  |_|______|  |_|  |______|_|  \_\
   
-                 POWER METER V.0
+                 POWER METER V.1
        TEAM MEMBERS:
        1)Dwaipayan Shikari
        2)Shramana Mondal
        3)Prattay Barua
        4)Jayrup Das
-================================================================
+===============================================================
     """)
 
-def get_rms_readings():
-    v_sum_sq = 0
-    i_sum_sq = 0
-    v_raw_sum = 0
-    i_raw_sum = 0
-    
-    v_buffer = []
-    i_buffer = []
-
-    # 1. Capture Raw Samples
+def capture_samples():
+    raw_sum = 0
+    buffer = []
     for _ in range(SAMPLES):
-        v_val = adc_v.read_u16()
-        i_val = adc_i.read_u16()
-        
-        v_buffer.append(v_val)
-        i_buffer.append(i_val)
-        
-        v_raw_sum += v_val
-        i_raw_sum += i_val
+        val = adc_i.read_u16()
+        buffer.append(val)
+        raw_sum += val
         utime.sleep_us(SAMPLE_DELAY_US)
+    offset = raw_sum / SAMPLES
+    scaled = [(v - offset) * (ADC_VREF / ADC_COUNTS) * ICAL for v in buffer]
+    return scaled
 
-    # 2. Calculate DC Offset (the 1.65V bias of the sensors)
-    v_offset = v_raw_sum / SAMPLES
-    i_offset = i_raw_sum / SAMPLES
+def calc_rms(samples):
+    sum_sq = sum(s * s for s in samples)
+    return math.sqrt(sum_sq / len(samples))
 
-    # 3. Calculate RMS
-    for k in range(SAMPLES):
-        # Subtract DC offset and scale to Volts
-        v_acc = (v_buffer[k] - v_offset) * (ADC_VREF / ADC_COUNTS) * VCAL
-        i_acc = (i_buffer[k] - i_offset) * (ADC_VREF / ADC_COUNTS) * ICAL
-        
-        v_sum_sq += v_acc * v_acc
-        i_sum_sq += i_acc * i_acc
+def calc_frequency(samples):
+    crossings = 0
+    offset = sum(samples) / len(samples)
+    for k in range(1, len(samples)):
+        if (samples[k - 1] - offset) <= 0 and (samples[k] - offset) > 0:
+            crossings += 1
+    if crossings < 2:
+        return 0.0
+    sample_rate = 1_000_000 / SAMPLE_DELAY_US
+    return sample_rate * crossings / (SAMPLES - 1)
 
-    v_rms = math.sqrt(v_sum_sq / SAMPLES)
-    i_rms = math.sqrt(i_sum_sq / SAMPLES)
-    
-    return v_rms, i_rms
+def calc_thd(samples):
+    N = len(samples)
+    fund_real = 0.0
+    fund_imag = 0.0
+    harm_power = 0.0
+    for n in range(N):
+        angle = 2 * math.pi * n / N
+        fund_real += samples[n] * math.cos(angle)
+        fund_imag += samples[n] * math.sin(angle)
+    fund_mag = 2 * math.sqrt(fund_real ** 2 + fund_imag ** 2) / N
+    for h in range(2, 11):
+        h_real = 0.0
+        h_imag = 0.0
+        for n in range(N):
+            angle = 2 * math.pi * h * n / N
+            h_real += samples[n] * math.cos(angle)
+            h_imag += samples[n] * math.sin(angle)
+        h_mag = 2 * math.sqrt(h_real ** 2 + h_imag ** 2) / N
+        harm_power += h_mag ** 2
+    return math.sqrt(harm_power) / fund_mag * 100 if fund_mag > 0 else 0.0
 
-# ─── Main Execution ──────────────────────────────────────────
 print_header()
 utime.sleep(1)
-print("Starting AC Measurements (Vrms & Irms)...")
+print("Starting Current, Frequency & THD Measurements...")
 
 while True:
     try:
-        v_rms, i_rms = get_rms_readings()
-        
-        # ─── Output & Corruption Logic ───────────────────────
+        samples = capture_samples()
+        irms = calc_rms(samples)
+        freq = calc_frequency(samples)
+        thd = calc_thd(samples)
         print("-" * 40)
-        
-        # Warning if voltage is suspiciously high or out of normal bounds
-        if v_rms > 280.0:
-            print("![WARNING]! : VOLTAGE READING IS CORRUPTED!")
-            print(f"Check Connections. Raw detected: {v_rms:.2f} V")
-        else:
-           
-            print(f"Voltage: {v_rms:6.2f} V (Voltage reading is corrupted ,ask the builder)")
-            print(f"Current: {i_rms:6.3f} A")
-        
+        print(f"Current:  {irms:6.3f} A")
+        print(f"Freq:     {freq:6.2f} Hz")
+        print(f"THD:      {thd:6.2f} %")
         utime.sleep_ms(500)
-        
     except Exception as e:
         print(f"Error: {e}")
         utime.sleep_ms(2000)
