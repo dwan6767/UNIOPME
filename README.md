@@ -1,15 +1,13 @@
 # Power Meter V.0
 
-An AC power meter project that measures RMS voltage and current using MicroPython on a Raspberry Pi Pico.
+[![Open Source Hardware](https://img.shields.io/badge/Open%20Source-Hardware-green.svg)](https://oshwa.org/)
+[![MicroPython](https://img.shields.io/badge/MicroPython-3.3V-blue.svg)](https://micropython.org/)
+[![Raspberry Pi Pico](https://img.shields.io/badge/Raspberry%20Pi-Pico-EC1D24.svg)](https://www.raspberrypi.com/products/raspberry-pi-pico/)
+[![License: CERN-OHL-P](https://img.shields.io/badge/License-CERN--OHL--P-red.svg)](https://ohwr.org/cern-ohl)
+
+An AC power meter project that measures RMS current, frequency, and THD using MicroPython on a Raspberry Pi Pico.
 
 ![Power Meter](Models/0.png)
-
-## Team
-
-- Dwaipayan Shikari
-- Shramana Mondal
-- Prattay Barua
-- Jayrup Das
 
 ## Hardware
 
@@ -27,9 +25,15 @@ An AC power meter project that measures RMS voltage and current using MicroPytho
 
 Written in MicroPython. Samples at 5 kHz (500 samples per reading) and computes RMS values after DC offset removal.
 
+### Features
+
+- **RMS Current** measurement
+- **Frequency** detection via zero-crossing
+- **THD** (Total Harmonic Distortion) via FFT analysis
+- Real-time serial output
+
 ### Calibration Factors
 
-- `VCAL = 268.97` — Voltage calibration
 - `ICAL = 16.667 / 3` — Current calibration
 
 ### Usage
@@ -40,7 +44,7 @@ Flash `Firmware/main.py` to the Pico and monitor via serial REPL.
 
 ```
 Hardware/
-├── Designs/        # Schematic (schematic.pdf), Easypower project (rp.eprj)
+├── Designs/        # Schematic (schematic.pdf), EasyEDA project (rp.eprj), Gerber files (power.zip)
 ├── Docs/           # Project report and documentation
 ├── Firmware/       # MicroPython source (main.py)
 ├── Models/         # 3D renders, photos, and enclosure PDFs
@@ -56,3 +60,7 @@ Hardware/
 | ![Model 3](Models/3.png) | ![Test Software](Models/test_soft.jpeg) |
 
 ## License
+
+This project is certified [Open Source Hardware](https://oshwa.org/definition/) under the [CERN Open Hardware License v2.0](https://ohwr.org/cern-ohl).
+
+[![OSHW](https://img.shields.io/badge/OSHW-Certified-brightgreen.svg)](https://oshwa.org/)

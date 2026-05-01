@@ -28,11 +28,6 @@ def print_header():
   |_|  |_|______|  |_|  |______|_|  \_\
   
                  POWER METER V.1
-       TEAM MEMBERS:
-       1)Dwaipayan Shikari
-       2)Shramana Mondal
-       3)Prattay Barua
-       4)Jayrup Das
 ===============================================================
     """)
 
