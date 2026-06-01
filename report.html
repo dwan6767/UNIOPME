@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AC Power Meter V.0 — Technical Report</title>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: 'DejaVu Serif', serif; font-size: 11pt; line-height: 1.6; color: #222; }
+  h1, h2, h3, h4, th { font-family: 'DejaVu Sans', sans-serif; }
+  h1 { font-size: 26pt; margin-top: 0; }
+  h2 { font-size: 18pt; border-bottom: 2px solid #2c7a3e; padding-bottom: 4px; margin-top: 30px; }
+  h3 { font-size: 14pt; margin-top: 20px; }
+  h4 { font-size: 12pt; margin-top: 14px; color: #2c7a3e; }
+  .cover { text-align: center; padding-top: 80px; page-break-after: always; }
+  .cover h1 { font-size: 32pt; color: #1a4d2e; font-family: 'DejaVu Serif', serif; }
+  .cover h2 { font-size: 18pt; border: none; color: #555; }
+  .cover .team { margin-top: 40px; font-size: 12pt; line-height: 1.8; }
+  .cover .affil { margin-top: 20px; font-size: 13pt; color: #444; }
+  .cover .repo { margin-top: 30px; font-size: 10pt; color: #666; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 10pt; }
+  th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
+  th { background: #2c7a3e; color: #fff; }
+  pre { background: #f4f4f4; border: 1px solid #ddd; border-radius: 4px; padding: 10px; font-size: 7.5pt; font-family: 'DejaVu Sans Mono', monospace; }
+  code { font-family: 'DejaVu Sans Mono', monospace; font-size: 9pt; }
+  img { max-width: 100%; height: auto; }
+  .page-break { page-break-before: always; }
+  .note { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 14px; margin: 16px 0; border-radius: 4px; }
+  .note strong { color: #856404; }
+  .eq { text-align: center; font-style: italic; margin: 14px 0; font-size: 12pt; font-family: 'DejaVu Serif', serif; }
+  li { margin: 4px 0; }
+  section { text-align: justify; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>AC Power Meter V.0</h1>
+  <h2>Technical Report</h2>
+  <p class="affil">
+    <strong>Jadavpur University</strong><br>
+    Department of Electrical Engineering
+  </p>
+  <div class="team">
+    <strong>Team Members:</strong><br>
+    Dwaipayan Shikari<br>
+    Shramana Mondal<br>
+    Prattay Barua<br>
+    Jayrup Das
+  </div>
+  <p class="repo">
+    <strong>Repository:</strong><br>
+    <code>https://github.com/dwan6767/UNIOPME</code>
+  </p>
+  <p style="margin-top:50px; color:#999; font-size:10pt;">
+    Raspberry Pi Pico &middot; MicroPython &middot; Open Source Hardware
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<section>
+<h2>1. Project Overview</h2>
+<p>
+The <strong>AC Power Meter V.0</strong> is a low-cost, open-source hardware
+instrument for measuring AC electrical parameters, developed as an academic
+project at the <strong>Department of Electrical Engineering, Jadavpur
+University</strong>. It uses a Raspberry Pi Pico running MicroPython
+to sample current signals via the ZMCT103C sensor, then computes
+<strong>RMS current</strong>, <strong>line frequency</strong>, and
+<strong>Total Harmonic Distortion (THD)</strong> in real time. Results are
+output over the serial REPL at 500 ms intervals.
+</p>
+
+<div class="note">
+  <strong>Note — Voltage measurement:</strong> The PCB uses an RP2040
+  (QFN-56 package) soldered directly onto the board. Due to soldering
+  difficulties with the fine-pitch QFN package, the analogue pin (GPIO 26)
+  for the ZMPT101B voltage sensor is not fully connected. Consequently,
+  only <strong>current-based measurements</strong> (I<sub>RMS</sub>,
+  frequency from current signal, THD from current signal) are functional
+  in this prototype. The voltage sensor channel is wired identically to
+  the current channel in the firmware, so once the hardware is reworked
+  the full two-channel measurement will operate.
+</div>
+
+<table>
+  <tr><th>Property</th><th>Value</th></tr>
+  <tr><td>Microcontroller</td><td>Raspberry Pi Pico (RP2040)</td></tr>
+  <tr><td>Firmware Language</td><td>MicroPython</td></tr>
+  <tr><td>ADC Resolution</td><td>16-bit (0–3.3 V)</td></tr>
+  <tr><td>Sampling Rate</td><td>5 kHz (500 samples per window)</td></tr>
+  <tr><td>Measured Quantities</td><td>I<sub>RMS</sub>, f, THD</td></tr>
+  <tr><td>License</td><td>CERN Open Hardware License v2.0 (CERN-OHL-P)</td></tr>
+  <tr><td>Repository</td><td><code>github.com/dwan6767/UNIOPME</code></td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<section class="page-break">
+<h2>2. Theoretical Background</h2>
+
+<h3>2.1 Alternating Current (AC) Fundamentals</h3>
+<p>
+An alternating current waveform varies sinusoidally with time:
+</p>
+<div class="eq">i(t) = I<sub>pk</sub> sin(2&pi; f t + &phi;)</div>
+<p>
+where I<sub>pk</sub> is the peak current, f is the frequency (50 or 60 Hz
+for mains), and &phi; is the phase angle. The <strong>RMS</strong> (Root
+Mean Square) value is the equivalent DC current that would dissipate the
+same power in a resistive load:
+</p>
+<div class="eq">
+I<sub>RMS</sub> = &radic;( (1/T) &int;<sub>0</sub><sup>T</sup> i(t)&sup2; dt )
+</div>
+<p>
+For a pure sine wave, I<sub>RMS</sub> = I<sub>pk</sub> / &radic;2 .
+However, in practice the waveform contains harmonics, making direct
+digital sampling and numerical RMS computation necessary.
+</p>
+
+<h3>2.2 Discrete Sampling Theory</h3>
+<p>
+The Raspberry Pi Pico's ADC converts the continuous analogue signal into
+a discrete time series. The <strong>Nyquist-Shannon sampling theorem</strong>
+states that to faithfully reconstruct a signal, the sampling frequency
+f<sub>s</sub> must be at least twice the highest frequency component
+present:
+</p>
+<div class="eq">f<sub>s</sub> &ge; 2 f<sub>max</sub></div>
+<p>
+This project samples at 5 kHz (T<sub>s</sub> = 200 &mu;s), allowing
+analysis of harmonics up to 2.5 kHz (the 50th harmonic of 50 Hz mains).
+A window of N = 500 samples captures 10 full cycles of a 50 Hz waveform,
+providing good frequency resolution (&Delta;f = f<sub>s</sub>/N = 10 Hz).
+</p>
+
+<h3>2.3 DC Offset Removal</h3>
+<p>
+The ADC output contains a DC bias due to the sensor's quiescent output
+voltage. The DC offset is estimated as the arithmetic mean of the sample
+window and subtracted from each sample:
+</p>
+<div class="eq">
+offset = (1/N) &sum;<sub>k=0</sub><sup>N-1</sup> x[k]<br>
+s[k] = x[k] &minus; offset
+</div>
+
+<h3>2.4 RMS Computation in Discrete Time</h3>
+<p>
+For a discrete signal s[k] of length N, the RMS is:
+</p>
+<div class="eq">
+s<sub>RMS</sub> = &radic;( (1/N) &sum;<sub>k=0</sub><sup>N-1</sup> s[k]&sup2; )
+</div>
+<p>
+This is exact for periodic signals when N spans an integer number of
+cycles and the sampling is uniform.
+</p>
+
+<h3>2.5 Frequency Detection via Zero-Crossing</h3>
+<p>
+Zero-crossing detection measures the number of times the AC waveform
+crosses its mean (zero after offset removal) in the positive-going
+direction. For a window of N samples:
+</p>
+<div class="eq">
+f = f<sub>s</sub> &times; N<sub>crossings</sub> / (N &minus; 1)
+</div>
+<p>
+The frequency resolution improves with longer observation windows.
+A minimum of two crossings (&ge;1 full cycle) is required for a
+valid reading.
+</p>
+
+<h3>2.6 Total Harmonic Distortion (THD)</h3>
+<p>
+THD quantifies how much the waveform deviates from a pure sinusoid.
+It is defined as the ratio of the RMS of all harmonic components to
+the RMS of the fundamental:
+</p>
+<div class="eq">
+THD = &radic;( &sum;<sub>h=2</sub><sup>&infin;</sup> H<sub>h</sub>&sup2; ) / H<sub>1</sub> &times; 100&nbsp;[%]
+</div>
+<p>
+where H<sub>1</sub> is the fundamental amplitude and H<sub>h</sub> are
+the harmonic amplitudes. This implementation uses a <strong>simplified
+DFT</strong> (often called the Goertzel algorithm) evaluating the complex
+Fourier coefficient at the fundamental frequency and at harmonics 2
+through 10:
+</p>
+<div class="eq">
+X[h] = &sum;<sub>n=0</sub><sup>N-1</sup> s[n] &middot; (cos(2&pi; h n / N) &minus; j sin(2&pi; h n / N))
+</div>
+<div class="eq">
+|H<sub>h</sub>| = 2 &times; |X[h]| / N
+</div>
+<p>
+The 2/N scaling accounts for the fact that the DFT gives the full
+peak-to-peak amplitude when the frequency aligns exactly with a bin
+centre. Harmonics up to H<sub>10</sub> are computed; higher-order
+contributions are typically negligible for mains waveforms.
+</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="page-break">
+<h2>3. Hardware Design</h2>
+
+<h3>3.1 Components</h3>
+<table>
+  <tr><th>Component</th><th>Role</th><th>ADC Pin</th><th>Status</th></tr>
+  <tr><td>Raspberry Pi Pico</td><td>Microcontroller &amp; ADC</td><td>—</td><td>OK</td></tr>
+  <tr><td>ZMPT101B</td><td>AC Voltage Sensor</td><td>GPIO 26</td><td>Not connected (soldering defect)</td></tr>
+  <tr><td>ZMCT103C</td><td>AC Current Sensor</td><td>GPIO 27</td><td>Functional</td></tr>
+</table>
+
+<h3>3.2 Sensor Details</h3>
+
+<h4>ZMPT101B — Voltage Sensor</h4>
+<p>
+The ZMPT101B is a PCB-mount voltage transformer based on a precision
+ZMPT101B micro voltage transformer. It provides galvanic isolation
+between the mains and the measurement circuit. The output is an AC
+voltage proportional to the input, biased at V<sub>CC</sub>/2 for
+single-supply ADC interfacing. Rated for up to 250 V RMS input with
+a transformation ratio of 1000:1000 (1:1).
+</p>
+
+<h4>ZMCT103C — Current Sensor</h4>
+<p>
+The ZMCT103C is a precision current transformer with a built-in
+burden resistor. It outputs an AC voltage linearly proportional to
+the primary current. Typical sensitivity: 1 V per 5 A input. The
+output is biased at V<sub>CC</sub>/2 and directly readable by the
+Pico ADC. Used here for the current measurement channel (GPIO 27).
+</p>
+
+<h3>3.3 RP2040 Soldering Issue</h3>
+<div class="note">
+  <strong>Known hardware limitation:</strong> The RP2040 is packaged as a
+  QFN-56 (7&times;7 mm, 0.4 mm pitch). Hand-soldering this fine-pitch
+  package on a two-layer PCB proved challenging. The GPIO 26 pad (voltage
+  sensor ADC input) did not form a reliable solder joint. All other pins
+  were verified functional. A rework with hot-air soldering or a
+  professionally-assembled board will restore the voltage measurement
+  channel. The firmware already supports both channels; only ADC pin
+  initialisation for GPIO 26 is required.
+</div>
+
+<h3>3.4 Schematic</h3>
+<p>
+The full schematic and EasyEDA project are available in the
+<code>Designs/</code> directory:
+</p>
+<ul>
+  <li><code>Designs/schematic.pdf</code> — Circuit schematic</li>
+  <li><code>Designs/rp.eprj</code> — EasyEDA project file</li>
+  <li><code>Designs/power.zip</code> — Gerber fabrication files</li>
+</ul>
+
+<h3>3.5 Enclosure</h3>
+<p>
+3D-printable enclosure designs in PDF format are available under
+<code>Models/</code> (files <code>1_p.pdf</code> and <code>2_p.pdf</code>).
+Renders of the assembled model are shown in the Gallery section.
+</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="page-break">
+<h2>4. Firmware</h2>
+
+<h3>4.1 Signal Processing Pipeline</h3>
+<ol>
+  <li><strong>Sampling</strong> — 500 ADC readings at 200 &mu;s intervals (5 kHz).</li>
+  <li><strong>DC offset removal</strong> — The arithmetic mean of the buffer is subtracted from each sample.</li>
+  <li><strong>Scaling</strong> — Raw ADC counts are converted to volts, then multiplied by the current calibration factor <code>ICAL</code>.</li>
+  <li><strong>RMS calculation</strong> — Square root of the mean of squared samples.</li>
+  <li><strong>Frequency detection</strong> — Zero-crossing count divided by the window duration.</li>
+  <li><strong>THD calculation</strong> — Discrete Fourier analysis of the fundamental and harmonics 2&ndash;10 via the Goertzel algorithm.</li>
+</ol>
+
+<h3>4.2 Calibration</h3>
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+  <tr><td>ICAL</td><td>16.667 / 3 &asymp; 5.556</td><td>Current sensor sensitivity &amp; burden scaling</td></tr>
+  <tr><td>SAMPLES</td><td>500</td><td>Samples per measurement window</td></tr>
+  <tr><td>SAMPLE_DELAY_US</td><td>200 &mu;s</td><td>Interval between successive samples</td></tr>
+  <tr><td>ADC_VREF</td><td>3.3 V</td><td>ADC reference voltage</td></tr>
+  <tr><td>ADC_COUNTS</td><td>65 535</td><td>16-bit ADC full-scale count (2<sup>16</sup> &minus; 1)</td></tr>
+</table>
+
+<h3>4.3 Source Code</h3>
+<p>The complete firmware (<code>Firmware/main.py</code>, 99 lines):</p>
+<pre>import utime
+import math
+from machine import ADC, Pin
+
+SAMPLES = 500
+SAMPLE_DELAY_US = 200
+ADC_VREF = 3.3
+ADC_COUNTS = 65535
+ICAL = 16.667 / 3
+
+adc_i = ADC(Pin(27))
+
+def print_header():
+    print(r"""
+===============================================================
+   _____   ______          ________ _____
+  |  __ \ / __ \ \        / /  ____|  __ \
+  | |__) | |  | \ \  /\  / /| |__  | |__) |
+  |  ___/| |  | |\ \/  \/ / |  __| |  _  /
+  | |    | |__| | \  /\  /  | |____| | \ \
+  |_|     \____/   \/  \/   |______|_|  \_\
+
+   __  __ ______ _______ ______ _____
+  |  \/  |  ____|__   __|  ____|  __ \
+  | \  / | |__     | |  | |__  | |__) |
+  | |\/| |  __|    | |  |  __| |  _  /
+  | |  | | |____   | |  | |____| | \ \
+  |_|  |_|______|  |_|  |______|_|  \_\
+
+              POWER METER V.1
+===============================================================
+    """)
+
+def capture_samples():
+    raw_sum = 0
+    buffer = []
+    for _ in range(SAMPLES):
+        val = adc_i.read_u16()
+        buffer.append(val)
+        raw_sum += val
+        utime.sleep_us(SAMPLE_DELAY_US)
+    offset = raw_sum / SAMPLES
+    scaled = [(v - offset) * (ADC_VREF / ADC_COUNTS) * ICAL for v in buffer]
+    return scaled
+
+def calc_rms(samples):
+    sum_sq = sum(s * s for s in samples)
+    return math.sqrt(sum_sq / len(samples))
+
+def calc_frequency(samples):
+    crossings = 0
+    offset = sum(samples) / len(samples)
+    for k in range(1, len(samples)):
+        if (samples[k - 1] - offset) <= 0 and (samples[k] - offset) > 0:
+            crossings += 1
+    if crossings < 2:
+        return 0.0
+    sample_rate = 1_000_000 / SAMPLE_DELAY_US
+    return sample_rate * crossings / (SAMPLES - 1)
+
+def calc_thd(samples):
+    N = len(samples)
+    fund_real = 0.0
+    fund_imag = 0.0
+    harm_power = 0.0
+    for n in range(N):
+        angle = 2 * math.pi * n / N
+        fund_real += samples[n] * math.cos(angle)
+        fund_imag += samples[n] * math.sin(angle)
+    fund_mag = 2 * math.sqrt(fund_real ** 2 + fund_imag ** 2) / N
+    for h in range(2, 11):
+        h_real = 0.0
+        h_imag = 0.0
+        for n in range(N):
+            angle = 2 * math.pi * h * n / N
+            h_real += samples[n] * math.cos(angle)
+            h_imag += samples[n] * math.sin(angle)
+        h_mag = 2 * math.sqrt(h_real ** 2 + h_imag ** 2) / N
+        harm_power += h_mag ** 2
+    return math.sqrt(harm_power) / fund_mag * 100 if fund_mag > 0 else 0.0
+
+print_header()
+utime.sleep(1)
+print("Starting Current, Frequency &amp; THD Measurements...")
+
+while True:
+    try:
+        samples = capture_samples()
+        irms = calc_rms(samples)
+        freq = calc_frequency(samples)
+        thd = calc_thd(samples)
+        print("-" * 40)
+        print(f"Current:  {irms:6.3f} A")
+        print(f"Freq:     {freq:6.2f} Hz")
+        print(f"THD:      {thd:6.2f} %")
+        utime.sleep_ms(500)
+    except Exception as e:
+        print(f"Error: {e}")
+        utime.sleep_ms(2000)
+</pre>
+</section>
+
+<!-- ============================================================ -->
+<section class="page-break">
+<h2>5. Measurement Algorithms — Derivation</h2>
+
+<h3>5.1 RMS Current</h3>
+<p>
+Let s[k] be the k-th sample after offset removal and scaling, representing
+instantaneous current in amperes. The RMS estimate over N samples is:
+</p>
+<div class="eq">
+I<sub>RMS</sub> = &radic;( (1/N) &sum;<sub>k=0</sub><sup>N-1</sup> s[k]&sup2; )
+</div>
+<p>
+This formula is the discrete-time equivalent of the continuous RMS
+integral. With N = 500 and f<sub>s</sub> = 5 kHz, the window spans
+100 ms, containing exactly 5 cycles of a 50 Hz (or 6 cycles of a
+60 Hz) mains waveform, giving a stable reading.
+</p>
+
+<h3>5.2 Frequency via Zero-Crossing</h3>
+<p>
+After DC offset removal, the signal oscillates around zero. Each
+positive-going transition (sample k&minus;1 &le; 0 and sample k &gt; 0)
+represents one half-cycle. The total number of zero crossings divided
+by the window duration gives the frequency. With N crossings counted
+over N samples at sample period T<sub>s</sub>:
+</p>
+<div class="eq">
+f = (N<sub>crossings</sub> &times; f<sub>s</sub>) / (N &minus; 1)
+</div>
+<p>
+The denominator N&minus;1 accounts for the number of intervals between
+N samples. The minimum detectable frequency is 2f<sub>s</sub>/N = 20 Hz
+(at 2 crossings), safely below the 50/60 Hz mains range.
+</p>
+
+<h3>5.3 Total Harmonic Distortion via DFT</h3>
+<p>
+The discrete Fourier transform (DFT) at bin h is:
+</p>
+<div class="eq">
+X[h] = &sum;<sub>n=0</sub><sup>N-1</sup> s[n] &middot; e<sup>&minus;j2&pi; h n / N</sup>
+</div>
+<p>
+The magnitude of the h-th harmonic is:
+</p>
+<div class="eq">
+|H<sub>h</sub>| = (2/N) &times; |X[h]|
+</div>
+<p>
+The factor 2/N converts from DFT magnitude to peak amplitude of the
+sinusoidal component (the DFT distributes the signal energy between
+positive and negative frequency bins). THD is then:
+</p>
+<div class="eq">
+THD = &radic;( &sum;<sub>h=2</sub><sup>10</sup> |H<sub>h</sub>|&sup2; ) / |H<sub>1</sub>| &times; 100&nbsp;[%]
+</div>
+<p>
+Only harmonics up to the 10th are evaluated. Since the sampling rate
+(5 kHz) can represent harmonics up to the 49th (2.45 kHz at 50 Hz
+fundamental), contributions from H<sub>11</sub> through H<sub>49</sub>
+are assumed negligible for typical mains loads &mdash; a common
+assumption in power quality measurements per IEC 61000-4-7.
+</p>
+
+<h3>5.4 Computational Complexity</h3>
+<p>
+A full N-point FFT requires O(N log N) operations, but computing only
+10 specific frequency bins (fundamental + 9 harmonics) via the direct
+DFT (Goertzel) approach uses O(10N) operations. For N = 500, this is
+approximately 5000 multiply-adds per measurement cycle, easily within
+the RP2040's capabilities at 133 MHz.
+</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="page-break">
+<h2>6. Gallery</h2>
+
+<table>
+  <tr>
+    <th style="width:50%;">3D Render (Front)</th>
+    <th style="width:50%;">3D Render (Rear)</th>
+  </tr>
+  <tr>
+    <td style="text-align:center;"><img src="Models/1.png" alt="Render 1" style="max-height:200px;"></td>
+    <td style="text-align:center;"><img src="Models/2.png" alt="Render 2" style="max-height:200px;"></td>
+  </tr>
+  <tr>
+    <th>3D Render (Angled)</th>
+    <th>2D Model</th>
+  </tr>
+  <tr>
+    <td style="text-align:center;"><img src="Models/3.png" alt="Render 3" style="max-height:200px;"></td>
+    <td style="text-align:center;"><img src="Models/2d_model.jpeg" alt="2D Model" style="max-height:200px;"></td>
+  </tr>
+  <tr>
+    <th>Test Setup</th>
+    <th>Test with load</th>
+  </tr>
+  <tr>
+    <td style="text-align:center;"><img src="Models/test_setup.jpeg" alt="Test Setup" style="max-height:200px;"></td>
+    <td style="text-align:center;"><img src="Models/test.jpeg" alt="Test" style="max-height:200px;"></td>
+  </tr>
+</table>
+
+</section>
+
+<!-- ============================================================ -->
+<section class="page-break">
+<h2>7. Project Structure</h2>
+
+<pre>
+Hardware/
++-- Designs/          # Schematic (schematic.pdf)
+|   +-- rp.eprj       #   EasyEDA project
+|   +-- power.zip     #   Gerber files
+|   +-- schematic.pdf
++-- Docs/
+|   +-- AC_Power_Meter_Report.docx
+|   +-- POWER METER-2.pdf
++-- Firmware/
+|   +-- main.py       # MicroPython source (99 lines)
++-- Models/           # 3D renders, photos, enclosure PDFs
+|   +-- 0.png
+|   +-- 1.png / 1_p.pdf
+|   +-- 2.png / 2_p.pdf
+|   +-- 3.png
+|   +-- 2d_model.jpeg
+|   +-- test_setup.jpeg
+|   +-- test_soft.jpeg
+|   +-- test.jpeg
++-- report.html       # This file
++-- README.md
+</pre>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>8. License</h2>
+<p>
+This project is certified
+<a href="https://oshwa.org/definition/">Open Source Hardware</a>
+under the
+<a href="https://ohwr.org/cern-ohl">CERN Open Hardware License v2.0</a>
+(CERN-OHL-P).
+</p>
+</section>
+
+</body>
+</html>
